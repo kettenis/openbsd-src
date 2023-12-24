@@ -219,7 +219,7 @@ int	apldart_t8110_intr(void *);
 
 void	apldart_t8020_flush_tlb(struct apldart_softc *, int);
 void	apldart_t8110_flush_tlb(struct apldart_softc *, int);
-int	apldart_load_map(struct apldart_stream *, bus_dmamap_t);
+int	apldart_load_map(struct apldart_stream *, bus_dmamap_t, int);
 void	apldart_unload_map(struct apldart_stream *, bus_dmamap_t);
 
 int	apldart_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
@@ -740,7 +740,7 @@ apldart_lookup_tte(struct apldart_stream *as, bus_addr_t dva)
 }
 
 int
-apldart_load_map(struct apldart_stream *as, bus_dmamap_t map)
+apldart_load_map(struct apldart_stream *as, bus_dmamap_t map, int flags)
 {
 	struct apldart_softc *sc = as->as_sc;
 	struct apldart_map_state *ams = map->_dm_cookie;
@@ -757,8 +757,15 @@ apldart_load_map(struct apldart_stream *as, bus_dmamap_t map)
 		len = apldart_round_page(map->dm_segs[seg].ds_len + off);
 
 		mtx_enter(&as->as_dvamap_mtx);
-		error = extent_alloc_with_descr(as->as_dvamap, len,
-		    DART_PAGE_SIZE, 0, 0, EX_NOWAIT, &ams[seg].ams_er, &dva);
+		if (flags & BUS_DMA_FIXED) {
+			dva = apldart_trunc_page(map->dm_segs[seg].ds_addr);
+			error = extent_alloc_region_with_descr(as->as_dvamap,
+			    dva, len, EX_NOWAIT, &ams[seg].ams_er);
+		} else {
+			error = extent_alloc_with_descr(as->as_dvamap, len,
+			    DART_PAGE_SIZE, 0, 0, EX_NOWAIT, &ams[seg].ams_er,
+			    &dva);
+		}
 		mtx_leave(&as->as_dvamap_mtx);
 		if (error) {
 			apldart_unload_map(as, map);
@@ -887,7 +894,7 @@ apldart_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	if (error)
 		return error;
 
-	error = apldart_load_map(as, map);
+	error = apldart_load_map(as, map, flags);
 	if (error)
 		sc->sc_dmat->_dmamap_unload(sc->sc_dmat, map);
 
@@ -907,7 +914,7 @@ apldart_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map,
 	if (error)
 		return error;
 
-	error = apldart_load_map(as, map);
+	error = apldart_load_map(as, map, flags);
 	if (error)
 		sc->sc_dmat->_dmamap_unload(sc->sc_dmat, map);
 
@@ -927,7 +934,7 @@ apldart_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map,
 	if (error)
 		return error;
 
-	error = apldart_load_map(as, map);
+	error = apldart_load_map(as, map, flags);
 	if (error)
 		sc->sc_dmat->_dmamap_unload(sc->sc_dmat, map);
 
@@ -940,14 +947,25 @@ apldart_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
 {
 	struct apldart_stream *as = t->_cookie;
 	struct apldart_softc *sc = as->as_sc;
-	int error;
+	int i, error;
 
-	error = sc->sc_dmat->_dmamap_load_raw(sc->sc_dmat, map,
-	     segs, nsegs, size, flags);
-	if (error)
-		return error;
+	if (flags & BUS_DMA_FIXED) {
+		if (map->dm_nsegs != nsegs)
+			return EINVAL;
+		for (i = 0; i < nsegs; i++) {
+			if (map->dm_segs[i].ds_len != segs[i].ds_len)
+				return EINVAL;
+			map->dm_segs[i]._ds_paddr = segs[i].ds_addr;
+			map->dm_segs[i]._ds_vaddr = segs[i]._ds_vaddr;
+		}
+	} else {
+		error = sc->sc_dmat->_dmamap_load_raw(sc->sc_dmat, map,
+		     segs, nsegs, size, flags);
+		if (error)
+			return error;
+	}
 
-	error = apldart_load_map(as, map);
+	error = apldart_load_map(as, map, flags);
 	if (error)
 		sc->sc_dmat->_dmamap_unload(sc->sc_dmat, map);
 
