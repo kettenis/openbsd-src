@@ -446,10 +446,18 @@ static enum dcp_firmware_version dcp_check_firmware_version(struct device *dev)
 
 	if (strncmp(compat_str, "12.3.0", sizeof(compat_str)) == 0)
 		return DCP_FIRMWARE_V_12_3;
-	if (strncmp(compat_str, "13.3.0", sizeof(compat_str)) == 0)
-		return DCP_FIRMWARE_V_13_3;
-	if (strncmp(compat_str, "13.5.0", sizeof(compat_str)) == 0)
-		return DCP_FIRMWARE_V_13_3;
+	/*
+	 * m1n1 reports firmware version 13.5 as compatible with 13.3. This is
+	 * only true for the iomfb endpoint. The interface for the dptx-port
+	 * endpoint changed between 13.3 and 13.5. The driver will only support
+	 * firmware 13.5. Check the actual firmware version for compat version
+	 * 13.3 until m1n1 reports 13.5 as "firmware-compat".
+	 */
+	else if ((strncmp(compat_str, "13.3.0", sizeof(compat_str)) == 0) &&
+		 (strncmp(fw_str, "13.5.0", sizeof(compat_str)) == 0))
+		return DCP_FIRMWARE_V_13_5;
+	else if (strncmp(compat_str, "13.5.0", sizeof(compat_str)) == 0)
+		return DCP_FIRMWARE_V_13_5;
 
 	dev_err(dev, "DCP firmware-compat %s (FW: %s) is not supported\n",
 		compat_str, fw_str);
@@ -598,7 +606,6 @@ static int dcp_platform_probe(struct platform_device *pdev)
 	enum dcp_firmware_version fw_compat;
 	struct device *dev = &pdev->dev;
 	struct apple_dcp *dcp;
-	int ret;
 
 	fw_compat = dcp_check_firmware_version(dev);
 	if (fw_compat == DCP_FIRMWARE_UNKNOWN)
@@ -612,12 +619,6 @@ static int dcp_platform_probe(struct platform_device *pdev)
 	dcp->dev = dev;
 
 	platform_set_drvdata(pdev, dcp);
-
-	ret = devm_of_platform_populate(dev);
-	if (ret) {
-		dev_err(dev, "failed to populate child devices: %d\n", ret);
-		return ret;
-	}
 
 	return component_add(&pdev->dev, &dcp_comp_ops);
 }
@@ -636,7 +637,7 @@ static void dcp_platform_shutdown(struct platform_device *pdev)
 	component_del(&pdev->dev, &dcp_comp_ops);
 }
 
-static __maybe_unused int dcp_platform_suspend(struct device *dev)
+static int dcp_platform_suspend(struct device *dev)
 {
 	/*
 	 * Set the device as a wakeup device, which forces its power
@@ -648,13 +649,13 @@ static __maybe_unused int dcp_platform_suspend(struct device *dev)
 	return 0;
 }
 
-static __maybe_unused int dcp_platform_resume(struct device *dev)
+static int dcp_platform_resume(struct device *dev)
 {
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(dcp_platform_pm_ops,
-			 dcp_platform_suspend, dcp_platform_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(dcp_platform_pm_ops,
+				dcp_platform_suspend, dcp_platform_resume);
 
 static const struct of_device_id of_match[] = {
 	{ .compatible = "apple,dcp" },
