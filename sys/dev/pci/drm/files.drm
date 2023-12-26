@@ -1359,6 +1359,7 @@ file	dev/pci/drm/amd/pm/swsmu/smu_cmn.c			amdgpu
 device	apldcp
 attach	apldcp at fdt
 file	dev/pci/drm/apple/apldcp.c				apldcp
+file	dev/pci/drm/apple/afk.c					apldcp
 file	dev/pci/drm/apple/dcp_backlight.c			apldcp
 file	dev/pci/drm/apple/iomfb.c				apldcp
 file	dev/pci/drm/apple/iomfb_v12_3.c				apldcp

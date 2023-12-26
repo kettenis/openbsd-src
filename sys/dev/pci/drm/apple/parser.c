@@ -7,6 +7,8 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 
+#include <sound/pcm.h> // for sound format masks
+
 #include "parser.h"
 #include "trace.h"
 
@@ -117,6 +119,39 @@ static int skip(struct dcp_parse_ctx *handle)
 	}
 }
 
+static int skip_pair(struct dcp_parse_ctx *handle)
+{
+	int ret;
+
+	ret = skip(handle);
+	if (ret)
+		return ret;
+
+	return skip(handle);
+}
+
+static bool consume_string(struct dcp_parse_ctx *ctx, const char *specimen)
+{
+	struct dcp_parse_tag *tag;
+	const char *key;
+	ctx->pos = round_up(ctx->pos, 4);
+
+	if (ctx->pos + sizeof(*tag) + strlen(specimen) - 1 > ctx->len)
+		return false;
+	tag = ctx->blob + ctx->pos;
+	key = ctx->blob + ctx->pos + sizeof(*tag);
+	if (tag->padding)
+		return false;
+
+	if (tag->type != DCP_TYPE_STRING ||
+	    tag->size != strlen(specimen) ||
+	    strncmp(key, specimen, tag->size))
+		return false;
+
+	skip(ctx);
+	return true;
+}
+
 /* Caller must free the result */
 static char *parse_string(struct dcp_parse_ctx *handle)
 {
@@ -163,6 +198,26 @@ static int parse_bool(struct dcp_parse_ctx *handle, bool *b)
 		return PTR_ERR(tag);
 
 	*b = !!tag->size;
+	return 0;
+}
+
+static int parse_blob(struct dcp_parse_ctx *handle, size_t size, u8 **blob)
+{
+	struct dcp_parse_tag *tag = parse_tag_of_type(handle, DCP_TYPE_BLOB);
+	u8 *out;
+
+	if (IS_ERR(tag))
+		return PTR_ERR(tag);
+
+	if (tag->size < size)
+		return -EINVAL;
+
+	out = parse_bytes(handle, tag->size);
+
+	if (IS_ERR(out))
+		return PTR_ERR(out);
+
+	*blob = out;
 	return 0;
 }
 
@@ -533,3 +588,369 @@ int parse_display_attributes(struct dcp_parse_ctx *handle, int *width_mm,
 
 	return 0;
 }
+
+int parse_epic_service_init(struct dcp_parse_ctx *handle, const char **name,
+			    const char **class, s64 *unit)
+{
+	int ret = 0;
+	struct iterator it;
+	bool parsed_unit = false;
+	bool parsed_name = false;
+	bool parsed_class = false;
+
+	*name = ERR_PTR(-ENOENT);
+	*class = ERR_PTR(-ENOENT);
+
+	dcp_parse_foreach_in_dict(handle, it) {
+		char *key = parse_string(it.handle);
+
+		if (IS_ERR(key)) {
+			ret = PTR_ERR(key);
+			break;
+		}
+
+		if (!strcmp(key, "EPICName")) {
+			*name = parse_string(it.handle);
+			if (IS_ERR(*name))
+				ret = PTR_ERR(*name);
+			else
+				parsed_name = true;
+		} else if (!strcmp(key, "EPICProviderClass")) {
+			*class = parse_string(it.handle);
+			if (IS_ERR(*class))
+				ret = PTR_ERR(*class);
+			else
+				parsed_class = true;
+		} else if (!strcmp(key, "EPICUnit")) {
+			ret = parse_int(it.handle, unit);
+			if (!ret)
+				parsed_unit = true;
+		} else {
+			skip(it.handle);
+		}
+
+		kfree(key);
+		if (ret)
+			break;
+	}
+
+	if (!parsed_unit || !parsed_name || !parsed_class)
+		ret = -ENOENT;
+
+	if (ret) {
+		if (!IS_ERR(*name)) {
+			kfree(*name);
+			*name = ERR_PTR(ret);
+		}
+		if (!IS_ERR(*class)) {
+			kfree(*class);
+			*class = ERR_PTR(ret);
+		}
+	}
+
+	return ret;
+}
+
+int parse_sample_rate_bit(struct dcp_parse_ctx *handle, unsigned int *ratebit)
+{
+	s64 rate;
+	int ret = parse_int(handle, &rate);
+
+	if (ret)
+		return ret;
+
+	*ratebit = snd_pcm_rate_to_rate_bit(rate);
+	if (*ratebit == SNDRV_PCM_RATE_KNOT) {
+		/*
+		 * The rate wasn't recognized, and unless we supply
+		 * a supplementary constraint, the SNDRV_PCM_RATE_KNOT bit
+		 * will allow any rate. So clear it.
+		 */
+		*ratebit = 0;
+	}
+
+	return 0;
+}
+
+int parse_sample_fmtbit(struct dcp_parse_ctx *handle, u64 *fmtbit)
+{
+	s64 sample_size;
+	int ret = parse_int(handle, &sample_size);
+
+	if (ret)
+		return ret;
+
+	switch (sample_size) {
+	case 16:
+		*fmtbit = SNDRV_PCM_FMTBIT_S16;
+		break;
+	case 20:
+		*fmtbit = SNDRV_PCM_FMTBIT_S20;
+		break;
+	case 24:
+		*fmtbit = SNDRV_PCM_FMTBIT_S24;
+		break;
+	case 32:
+		*fmtbit = SNDRV_PCM_FMTBIT_S32;
+		break;
+	default:
+		*fmtbit = 0;
+		break;
+	}
+
+	return 0;
+}
+
+static struct {
+	const char *label;
+	u8 type;
+} chan_position_names[] = {
+	{ "Front Left", SNDRV_CHMAP_FL },
+	{ "Front Right", SNDRV_CHMAP_FR },
+	{ "Rear Left", SNDRV_CHMAP_RL },
+	{ "Rear Right", SNDRV_CHMAP_RR },
+	{ "Front Center", SNDRV_CHMAP_FC },
+	{ "Low Frequency Effects", SNDRV_CHMAP_LFE },
+	{ "Rear Center", SNDRV_CHMAP_RC },
+	{ "Front Left Center", SNDRV_CHMAP_FLC },
+	{ "Front Right Center", SNDRV_CHMAP_FRC },
+	{ "Rear Left Center", SNDRV_CHMAP_RLC },
+	{ "Rear Right Center", SNDRV_CHMAP_RRC },
+	{ "Front Left Wide", SNDRV_CHMAP_FLW },
+	{ "Front Right Wide", SNDRV_CHMAP_FRW },
+	{ "Front Left High", SNDRV_CHMAP_FLH },
+	{ "Front Center High", SNDRV_CHMAP_FCH },
+	{ "Front Right High", SNDRV_CHMAP_FRH },
+	{ "Top Center", SNDRV_CHMAP_TC },
+};
+
+static void append_chmap(struct snd_pcm_chmap_elem *chmap, u8 type)
+{
+	if (!chmap || chmap->channels >= ARRAY_SIZE(chmap->map))
+		return;
+
+	chmap->map[chmap->channels] = type;
+	chmap->channels++;
+}
+
+static int parse_chmap(struct dcp_parse_ctx *handle, struct snd_pcm_chmap_elem *chmap)
+{
+	struct iterator it;
+	int i, ret;
+
+	if (!chmap) {
+		skip(handle);
+		return 0;
+	}
+
+	chmap->channels = 0;
+
+	dcp_parse_foreach_in_array(handle, it) {
+		for (i = 0; i < ARRAY_SIZE(chan_position_names); i++)
+			if (consume_string(it.handle, chan_position_names[i].label))
+				break;
+
+		if (i == ARRAY_SIZE(chan_position_names)) {
+			ret = skip(it.handle);
+			if (ret)
+				return ret;
+
+			append_chmap(chmap, SNDRV_CHMAP_UNKNOWN);
+			continue;
+		}
+
+		append_chmap(chmap, chan_position_names[i].type);
+	}
+
+	return 0;
+}
+
+static int parse_chan_layout_element(struct dcp_parse_ctx *handle,
+				     unsigned int *nchans_out,
+				     struct snd_pcm_chmap_elem *chmap)
+{
+	struct iterator it;
+	int ret;
+	s64 nchans = 0;
+
+	dcp_parse_foreach_in_dict(handle, it) {
+		if (consume_string(it.handle, "ActiveChannelCount"))
+			ret = parse_int(it.handle, &nchans);
+		else if (consume_string(it.handle, "ChannelLayout"))
+			ret = parse_chmap(it.handle, chmap);
+		else
+			ret = skip_pair(it.handle);
+
+		if (ret)
+			return ret;
+	}
+
+	if (nchans_out)
+		*nchans_out = nchans;
+
+	return 0;
+}
+
+static int parse_nchans_mask(struct dcp_parse_ctx *handle, unsigned int *mask)
+{
+	struct iterator it;
+	int ret;
+
+	*mask = 0;
+
+	dcp_parse_foreach_in_array(handle, it) {
+		int nchans;
+
+		ret = parse_chan_layout_element(it.handle, &nchans, NULL);
+		if (ret)
+			return ret;
+		*mask |= 1 << nchans;
+	}
+
+	return 0;
+}
+
+static int parse_avep_element(struct dcp_parse_ctx *handle,
+			      struct dcp_sound_format_mask *sieve,
+			      struct dcp_sound_format_mask *hits)
+{
+	struct dcp_sound_format_mask mask = {0, 0, 0};
+	struct iterator it;
+	int ret;
+
+	dcp_parse_foreach_in_dict(handle, it) {
+		if (consume_string(handle, "StreamSampleRate"))
+			ret = parse_sample_rate_bit(it.handle, &mask.rates);
+		else if (consume_string(handle, "SampleSize"))
+			ret = parse_sample_fmtbit(it.handle, &mask.formats);
+		else if (consume_string(handle, "AudioChannelLayoutElements"))
+			ret = parse_nchans_mask(it.handle, &mask.nchans);
+		else
+			ret = skip_pair(it.handle);
+
+		if (ret)
+			return ret;
+	}
+
+	trace_avep_sound_mode(handle->dcp, mask.rates, mask.formats, mask.nchans);
+
+	if (!(mask.rates & sieve->rates) || !(mask.formats & sieve->formats) ||
+		!(mask.nchans & sieve->nchans))
+	    return 0;
+
+	if (hits) {
+		hits->rates |= mask.rates;
+		hits->formats |= mask.formats;
+		hits->nchans |= mask.nchans;
+	}
+
+	return 1;
+}
+
+static int parse_mode_in_avep_element(struct dcp_parse_ctx *handle,
+				      unsigned int selected_nchans,
+				      struct snd_pcm_chmap_elem *chmap,
+				      struct dcp_sound_cookie *cookie)
+{
+	struct iterator it;
+	struct dcp_parse_ctx save_handle;
+	int ret;
+
+	dcp_parse_foreach_in_dict(handle, it) {
+		if (consume_string(it.handle, "AudioChannelLayoutElements")) {
+			struct iterator inner_it;
+			int nchans;
+
+			dcp_parse_foreach_in_array(it.handle, inner_it) {
+				save_handle = *it.handle;
+				ret = parse_chan_layout_element(inner_it.handle,
+								&nchans, NULL);
+				if (ret)
+					return ret;
+
+				if (nchans != selected_nchans)
+					continue;
+
+				/*
+				 * Now that we know this layout matches the
+				 * selected channel number, reread the element
+				 * and fill in the channel map.
+				 */
+				*inner_it.handle = save_handle;
+				ret = parse_chan_layout_element(inner_it.handle,
+								NULL, chmap);
+				if (ret)
+					return ret;
+			}
+		} else if (consume_string(it.handle, "ElementData")) {
+			u8 *blob;
+
+			ret = parse_blob(it.handle, sizeof(*cookie), &blob);
+			if (ret)
+				return ret;
+
+			if (cookie)
+				memcpy(cookie, blob, sizeof(*cookie));
+		} else {
+			ret = skip_pair(it.handle);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+int parse_sound_constraints(struct dcp_parse_ctx *handle,
+			    struct dcp_sound_format_mask *sieve,
+			    struct dcp_sound_format_mask *hits)
+{
+	int ret;
+	struct iterator it;
+
+	if (hits) {
+		hits->rates = 0;
+		hits->formats = 0;
+		hits->nchans = 0;
+	}
+
+	dcp_parse_foreach_in_array(handle, it) {
+		ret = parse_avep_element(it.handle, sieve, hits);
+
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(parse_sound_constraints);
+
+int parse_sound_mode(struct dcp_parse_ctx *handle,
+		     struct dcp_sound_format_mask *sieve,
+		     struct snd_pcm_chmap_elem *chmap,
+		     struct dcp_sound_cookie *cookie)
+{
+	struct dcp_parse_ctx save_handle;
+	struct iterator it;
+	int ret;
+
+	dcp_parse_foreach_in_array(handle, it) {
+		save_handle = *it.handle;
+		ret = parse_avep_element(it.handle, sieve, NULL);
+
+		if (!ret)
+			continue;
+
+		if (ret < 0)
+			return ret;
+
+		ret = parse_mode_in_avep_element(&save_handle, __ffs(sieve->nchans),
+						 chmap, cookie);
+		if (ret < 0)
+			return ret;
+		return 1;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(parse_sound_mode);
