@@ -92,7 +92,7 @@ struct cfdriver aplns_cd = {
 	NULL, "aplns", DV_DULL
 };
 
-int	nvme_ans_sart_map(void *, bus_addr_t *, bus_size_t);
+int	nvme_ans_sart_map(void *, bus_addr_t, bus_size_t);
 int	nvme_ans_sart_unmap(void *, bus_addr_t, bus_size_t);
 
 int
@@ -331,11 +331,11 @@ nvme_ans_shutdown(struct nvme_ans_softc *asc)
 }
 
 int
-nvme_ans_sart_map(void *cookie, bus_addr_t *addr, bus_size_t size)
+nvme_ans_sart_map(void *cookie, bus_addr_t addr, bus_size_t size)
 {
 	struct nvme_ans_softc *asc = cookie;
 	
-	return aplsart_map(asc->asc_sart, *addr, size);
+	return aplsart_map(asc->asc_sart, addr, size);
 }
 
 int

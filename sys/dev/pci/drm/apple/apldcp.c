@@ -102,18 +102,6 @@ struct apple_rtkit {
 	struct taskq *tq;
 };
 
-int
-apple_rtkit_map(void *cookie, bus_addr_t *addr, bus_size_t size)
-{
-	struct apple_rtkit *rtk = cookie;
-	uint64_t mask;
-
-	mask = OF_getpropint64(rtk->pdev->node, "apple,asc-dram-mask", 0);
-	*addr |= mask;
-
-	return 0;
-}
-
 paddr_t
 apple_rtkit_logmap(void *cookie, bus_addr_t addr)
 {
@@ -126,23 +114,20 @@ apple_rtkit_logmap(void *cookie, bus_addr_t addr)
 	uint64_t reg[2];
 	uint64_t mask;
 
-	mask = OF_getpropint64(rtk->pdev->node, "apple,asc-dram-mask", 0);
-	addr &= ~mask;
-
 	len = OF_getproplen(rtk->pdev->node, "memory-region");
 	idx = OF_getindex(rtk->pdev->node, "dcp_data", "memory-region-names");
 	if (idx < 0 || idx >= len / sizeof(uint32_t))
 		return addr;
-	
+
 	phandles = malloc(len, M_TEMP, M_WAITOK | M_ZERO);
 	OF_getpropintarray(rtk->pdev->node, "memory-region",
 	    phandles, len);
 	node = OF_getnodebyphandle(phandles[idx]);
 	free(phandles, M_TEMP, len);
-	
+
 	if (node == 0)
 		return addr;
-	
+
 	if (!OF_is_compatible(node, "apple,asc-mem"))
 		return addr;
 
@@ -154,10 +139,15 @@ apple_rtkit_logmap(void *cookie, bus_addr_t addr)
 		return addr;
 	start = (uint64_t)iommu_addresses[1] << 32 | iommu_addresses[2];
 	size = (uint64_t)iommu_addresses[3] << 32 | iommu_addresses[4];
-	if (addr < start || addr >= start + size)
-		return addr;
+	if (addr >= start && addr < start + size)
+		return reg[0] + (addr - start);
 
-	return reg[0] + (addr - start);
+	/* XXX some machines have truncated DVAs in "iommu-addresses" */
+	addr &= 0xffffffff;
+	if (addr >= start && addr < start + size)
+		return reg[0] + (addr - start);
+
+	return (paddr_t)-1;
 }
 
 void
@@ -235,7 +225,6 @@ devm_apple_rtkit_init(struct device *dev, void *cookie,
 	rk = malloc(sizeof(*rk), M_DEVBUF, M_WAITOK | M_ZERO);
 	rk->rk_cookie = rtk;
 	rk->rk_dmat = pdev->dmat;
-	rk->rk_map = apple_rtkit_map;
 	rk->rk_logmap = apple_rtkit_logmap;
 
 	rtk->state = rtkit_init(pdev->node, mbox_name, 0, rk);

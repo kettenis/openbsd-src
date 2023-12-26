@@ -42,7 +42,7 @@ struct apldrm_softc {
 	struct drm_device	sc_ddev;
 
 	int			sc_node;
-	
+
 	struct rasops_info	sc_ri;
 	struct wsscreen_descr	sc_wsd;
 	struct wsscreen_list	sc_wsl;
@@ -343,7 +343,7 @@ apldrm_attachhook(struct device *self)
 	if (sc->sc_node == stdout_node)
 		console = 1;
 
-	fb_helper = sc->sc_ddev.fb_helper;	
+	fb_helper = sc->sc_ddev.fb_helper;
 	ri->ri_hw = sc;
 	ri->ri_bits = fb_helper->info->screen_buffer;
 	ri->ri_flg = RI_CENTER | RI_VCONS | RI_WRONLY;
