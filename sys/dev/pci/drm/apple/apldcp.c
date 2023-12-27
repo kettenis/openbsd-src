@@ -52,7 +52,8 @@ apldcp_match(struct device *parent, void *match, void *aux)
 {
 	struct fdt_attach_args *faa = aux;
 
-	return OF_is_compatible(faa->fa_node, "apple,dcp");
+	return OF_is_compatible(faa->fa_node, "apple,dcp") ||
+	    OF_is_compatible(faa->fa_node, "apple,dcpext");
 }
 
 void
@@ -166,7 +167,6 @@ apple_rtkit_recv(void *cookie, uint64_t msg)
 	struct apple_rtkit *rtk = rtkep->rtk;
 
 	rtkep->msg = msg;
-	task_set(&rtkep->task, apple_rtkit_do_recv, rtkep);
 	task_add(rtk->tq, &rtkep->task);
 }
 
@@ -179,6 +179,7 @@ apple_rtkit_start_ep(struct apple_rtkit *rtk, uint8_t ep)
 	rtkep = &rtk->ep[ep];
 	rtkep->rtk = rtk;
 	rtkep->ep = ep;
+	task_set(&rtkep->task, apple_rtkit_do_recv, rtkep);
 
 	error = rtkit_start_endpoint(rtk->state, ep, apple_rtkit_recv, rtkep);
 	return -error;
@@ -233,4 +234,18 @@ devm_apple_rtkit_init(struct device *dev, void *cookie,
 	rtk->ops = ops;
 
 	return rtk;
+}
+
+static const void *
+of_device_get_match_data(const struct device *dev)
+{
+	struct platform_device *pdev = (struct platform_device *)dev;
+	int i;
+
+	for (i = 0; i < nitems(of_match); i++) {
+		if (OF_is_compatible(pdev->node, of_match[i].compatible))
+			return of_match[i].data;
+	}
+
+	return NULL;
 }

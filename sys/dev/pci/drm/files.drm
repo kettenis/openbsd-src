@@ -1361,10 +1361,13 @@ attach	apldcp at fdt
 file	dev/pci/drm/apple/apldcp.c				apldcp
 file	dev/pci/drm/apple/afk.c					apldcp
 file	dev/pci/drm/apple/dcp_backlight.c			apldcp
+file	dev/pci/drm/apple/dptxep.c				apldcp
+file	dev/pci/drm/apple/ibootep.c				apldcp
 file	dev/pci/drm/apple/iomfb.c				apldcp
 file	dev/pci/drm/apple/iomfb_v12_3.c				apldcp
 file	dev/pci/drm/apple/iomfb_v13_3.c				apldcp
 file	dev/pci/drm/apple/parser.c				apldcp
+file	dev/pci/drm/apple/systemep.c				apldcp
 
 device	apldrm: drmbase, wsemuldisplaydev, rasops32
 attach	apldrm at fdt
