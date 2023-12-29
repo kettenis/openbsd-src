@@ -70,13 +70,7 @@ apldcp_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	extern void dma_dev_register(struct device *, bus_dma_tag_t);
-	dma_dev_register(self, faa->fa_dmat);
-
 	sc->sc_dev.faa = faa;
-	sc->sc_dev.node = faa->fa_node;
-	sc->sc_dev.num_resources = faa->fa_nreg;
-	extern void platform_device_register(struct platform_device *);
 	platform_device_register(&sc->sc_dev);
 
 	dcp_platform_probe(&sc->sc_dev);

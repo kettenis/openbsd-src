@@ -119,10 +119,8 @@ apldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	extern void dma_dev_register(struct device *, bus_dma_tag_t);
-	dma_dev_register(self, faa->fa_dmat);
-
-	sc->sc_dev.node = faa->fa_node;
+	sc->sc_dev.faa = faa;
+	platform_device_register(&sc->sc_dev);
 
 	drm_attach_platform((struct drm_driver *)&apple_drm_driver,
 	    faa->fa_iot, faa->fa_dmat, self, &sc->sc_ddev);

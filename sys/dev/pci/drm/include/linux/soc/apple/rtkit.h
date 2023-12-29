@@ -1,3 +1,8 @@
+/* Public domain. */
+
+#ifndef _LINUX_SOC_APPLE_RTKIT_H
+#define _LINUX_SOC_APPLE_RTKIT_H
+
 #include <linux/bitfield.h>
 
 struct apple_rtkit;
@@ -24,6 +29,4 @@ int	apple_rtkit_send_message(struct apple_rtkit *, uint8_t, uint64_t,
 int	apple_rtkit_start_ep(struct apple_rtkit *, uint8_t);
 int	apple_rtkit_wake(struct apple_rtkit *);
 
-#define MEMREMAP_WB	(1 << 0)
-void *memremap(phys_addr_t, size_t, int);
-void memunmap(void *);
+#endif
