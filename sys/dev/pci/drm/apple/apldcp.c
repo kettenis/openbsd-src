@@ -38,9 +38,11 @@ struct apldcp_softc {
 
 int	apldcp_match(struct device *, void *, void *);
 void	apldcp_attach(struct device *, struct device *, void *);
+int	apldcp_activate(struct device *, int);
 
 const struct cfattach apldcp_ca = {
-	sizeof (struct apldcp_softc), apldcp_match, apldcp_attach
+	sizeof (struct apldcp_softc), apldcp_match, apldcp_attach,
+	NULL, apldcp_activate
 };
 
 struct cfdriver apldcp_cd = {
@@ -78,6 +80,29 @@ apldcp_attach(struct device *parent, struct device *self, void *aux)
 	platform_device_register(&sc->sc_dev);
 
 	dcp_platform_probe(&sc->sc_dev);
+}
+
+int
+apldcp_activate(struct device *self, int act)
+{
+	struct apldrm_softc *sc = (struct apldrm_softc *)self;
+	int rv;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		dcp_platform_suspend(self);
+		break;
+	case DVACT_WAKEUP:
+		dcp_platform_resume(self);
+		rv = config_activate_children(self, act);
+		break;
+	default:
+		rv = config_activate_children(self, act);
+		break;
+	}
+
+	return rv;
 }
 
 /*

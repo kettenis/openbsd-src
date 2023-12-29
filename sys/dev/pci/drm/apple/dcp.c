@@ -1027,6 +1027,8 @@ static void dcp_platform_shutdown(struct platform_device *pdev)
 	component_del(&pdev->dev, &dcp_comp_ops);
 }
 
+#endif
+
 static int dcp_platform_suspend(struct device *dev)
 {
 	struct apple_dcp *dcp = dev_get_drvdata(dev);
@@ -1065,7 +1067,6 @@ static int dcp_platform_resume(struct device *dev)
 static DEFINE_SIMPLE_DEV_PM_OPS(dcp_platform_pm_ops,
 				dcp_platform_suspend, dcp_platform_resume);
 
-#endif
 
 static const struct apple_dcp_hw_data apple_dcp_hw_t6020 = {
 	.num_dptx_ports = 1,
