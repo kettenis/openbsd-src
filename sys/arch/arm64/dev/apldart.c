@@ -805,7 +805,8 @@ apldart_load_map(struct apldart_stream *as, bus_dmamap_t map, int flags)
 		if (flags & BUS_DMA_FIXED) {
 			dva = apldart_trunc_page(map->dm_segs[seg].ds_addr);
 			/* XXX truncate because "apple,dma-range" mismatch */
-			dva &= sc->sc_dvamask;
+			if (dva > sc->sc_dvaend)
+				dva &= sc->sc_dvamask;
 			error = extent_alloc_region_with_descr(as->as_dvamap,
 			    dva, len, EX_NOWAIT, &ams[seg].ams_er);
 		} else {
